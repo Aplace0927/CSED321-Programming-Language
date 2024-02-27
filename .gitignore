@@ -1,0 +1,9 @@
+Notes/
+
+*.pdf
+*.zip
+
+*.depend
+*.cmi
+*.cmo
+*.mli
