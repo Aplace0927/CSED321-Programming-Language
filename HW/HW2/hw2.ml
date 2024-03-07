@@ -52,9 +52,9 @@ let alterSum (l: int list): int =
 
 let ltabulate (n: int) (f: int -> 'a): 'a list = 
   let rec ltabulate_tail (k: int) (f: int -> 'a) (acc: 'a list): 'a list = 
-    if k = 0 then [f 0] @ acc
-    else ltabulate_tail (k-1) (f) ([f k] @ acc)
-  in ltabulate_tail n f []
+    if k = n then acc
+    else ltabulate_tail (k+1) (f) (acc @ [f k])
+  in ltabulate_tail 0 f []
 ;;
 
 let lfilter (f: 'a -> bool) (l: 'a list): 'a list = 
