@@ -125,7 +125,7 @@ let rec powerset (l: 'a list): ('a list list) =
   | f::b -> 
     let rec join (x: 'a list) (sub: 'a list list): 'a list list = 
       match sub with
-      | [] -> []
+      | [] -> [[]]
       | fr::br -> [fr @ x] @ join x br  
     in join [] (powerset b) @ join [f] (powerset b)
 ;;
