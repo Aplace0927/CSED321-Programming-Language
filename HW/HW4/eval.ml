@@ -18,7 +18,7 @@ let getFreshVariable s =
 (*
  * implement a single step with reduction using the call-by-value strategy.
  *)
-let rec stepv (e: Uml.exp): Uml.exp =
+ let rec stepv (e: Uml.exp): Uml.exp =
   let rec substitute (vbef: Uml.exp) (vaft: Uml.exp) (expr: Uml.exp): Uml.exp = 
     match expr with
     | Var (x: Uml.var) -> if x = (Inout.exp2string vbef) then vaft else expr (* Only when should be replaced: NOT in free var *)
@@ -33,17 +33,16 @@ let rec stepv (e: Uml.exp): Uml.exp =
           | App (e1, e2: Uml.exp * Uml.exp) -> freevar e1 @ freevar e2 (* Union of free variables of both expression *)
           | Lam (x, e: Uml.var * Uml.exp) -> List.filter (fun v -> x <> v) (freevar e) (* Free variable except x*)
         in
-      if List.mem x (freevar e) then  (* x in free-var space of expression, need to be 'a-subst *)
+      if List.mem x (freevar vaft) then  (* x in free-var space of expression, need to be 'a-subst *)
         let fv = getFreshVariable x in
-        let modify_e = substitute (Uml.Var x) (Uml.Var fv) e in
-        Lam (fv, substitute vbef vaft modify_e)  (* Subst. with fresh variable*)
-      else  (* No need to be 'a-subst-ed*)
+        Lam (fv, substitute vbef vaft (substitute (Uml.Var x) (Uml.Var fv) e))  (* Subst. with fresh variable*)
+      else
         Lam (x, substitute vbef vaft e)
     in
   match e with
-  | App (Lam(bef, expr), aft) -> substitute (Uml.Var bef) aft expr (* Directly apply 'b-reduction *)
-  | App (e1, e2) -> let reduced_e1 = (stepv e1) in if e1 = reduced_e1 then App (e1, stepv e2) else App (stepv e1, e2) (* Apply 'b-reduction as CBV policy *)
-  | Lam (x, e) -> Lam (x, stepv e) (* Try step on expression part *)
+  | App(Lam(v, exp), Lam(v', exp')) -> substitute (Var v) (Lam(v', exp')) exp (* Apply CBV directly *)
+  | App(Lam(v, exp), following) -> App(Lam(v, exp), stepv following)  (* Apply CBV on following side *)
+  | App(heading, following) -> App(stepv heading, following)  (* Apply CBV on heading side *)
   | _ -> raise Stuck
 
 let stepOpt stepf e = try Some (stepf e) with Stuck -> None
