@@ -325,9 +325,10 @@ let rec exp2string exp =
 
 (* state2string : state -> string 
  * you may modify this function for debugging your code *)
-let state2string st = match st with
-    Anal_ST(_,_,exp,_) -> "Analysis : ???"
-  | Return_ST(_,_,_) -> "Return : ??? "
+let state2string st =
+  match st with
+  | Anal_ST(_,_,exp,_) -> "Analysis : " ^ exp2string (exp)
+  | Return_ST(_,_,valu) -> "Return : " ^ exp2string (value2exp (valu))
 
 (* ------------------------------------------------------------- *)     
 let stepOpt1 e = try Some (step1 e) with Stuck -> None
