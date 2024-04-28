@@ -47,7 +47,7 @@ let value2exp (v: value): exp =
   | VTrue -> True
   | VFalse -> False
   | VEunit -> Eunit
-  | VNum (i) -> Num (i)
+  | VNum(i) -> Num(i)
   | _ -> raise NotConvertible
 
 (* Problem 1. 
@@ -65,24 +65,26 @@ module ControlFlow =
 struct
   let return (st: state) (vl: value): state = 
     match st with
-    | Return_ST(_, _, _) -> raise Stuck
     | Anal_ST(heap, stck, expr, envr) -> Return_ST(heap, stck, vl)
-  let call (st: state) (fr: frame) (ex: exp): state = 
+    | Return_ST(heap, Frame_SK(oldstck, newfrm), valu) -> Return_ST(heap, oldstck, vl)
+    | _ -> raise Stuck
+  let call (st: state) (fr: frame) (ex: exp) (nv: env): state = 
     match st with
-    | Return_ST(_, _, _) -> raise Stuck
     | Anal_ST(heap, stck, expr, envr) -> Anal_ST(heap, Frame_SK(stck, fr), ex, envr)
-  let jump (st: state) (fr: frame) (ex: exp) (nv: env): state = 
-    match st with
-    | Return_ST(_, _, _) -> raise Stuck
-    | Anal_ST(heap, stck, expr, envr) -> Anal_ST(heap, Frame_SK(stck, fr), ex, nv)
+    | Return_ST(heap, Frame_SK(oldstck, newfrm), valu) -> Anal_ST(heap, Frame_SK(oldstck, fr), ex, nv)
+    | _ -> raise Stuck
   let branch (st: state) (ex: exp) (nv: env): state = 
     match st with
-    | Return_ST(_, _, _) -> raise Stuck
-    | Anal_ST(heap, stck, expr, envr) -> Anal_ST(heap, stck, ex, nv)
+    | Return_ST(heap, Frame_SK(oldstck, newfrm), valu) -> Anal_ST(heap, oldstck, ex, nv)
+    | _ -> raise Stuck
   let allocate (st: state) (ex: exp) (nv: env) (he, loc: (int * stoval) list * index): state = 
     match st with
-    | Return_ST(_, _, _) -> raise Stuck
-    | Anal_ST(heap, stck, expr, envr) -> Anal_ST(he, stck, ex, [loc] @ nv)
+    | Return_ST(heap, Frame_SK(oldstck, newfrm), valu) -> Anal_ST(he, oldstck, ex, [loc] @ nv)
+    | _ -> raise Stuck
+  let recurse (st: state) (ex: exp) (nv: env) (he, loc: (int * stoval) list * index): state = 
+    match st with
+    | Return_ST(heap, stck, valu) -> Anal_ST(he, stck, ex, [loc] @ nv)
+    | _ -> raise Stuck
 end
 
 let context (txp: texp): int Gamma.t =
@@ -239,68 +241,67 @@ let rec step1 (e: exp): exp =
 
 (* Problem 3. 
  * step2 : state -> state *)
-let step2 (st: state): state =
-  match st with
-  | Anal_ST (heap, stck, expr, envr: stoval Heap.heap * stack * exp * env) -> (
-      match expr with
-      | Eunit -> ControlFlow.return (st) (VEunit)
-      | Ind(x) -> (
-        if ((List.length (envr)) <= x) then raise Stuck
-        else (
-          let fram = Heap.deref (heap) (List.nth (envr) (x)) in
-          match fram with
-          | Computed(valu) -> ControlFlow.return (st) (valu)
-          | Delayed(expr, envr) -> ControlFlow.call (st) (FLoc(List.nth (envr) (x))) (expr)
+  let step2 (st: state): state =
+    match st with
+    | Anal_ST (heap, stck, expr, envr: stoval Heap.heap * stack * exp * env) -> (
+        match expr with
+        | Eunit -> ControlFlow.return (st) (VEunit)
+        | Ind(x) -> (
+          if ((List.length (envr)) <= x) then raise Stuck
+          else (
+            let fram = Heap.deref (heap) (List.nth (envr) (x)) in
+            match fram with
+            | Computed(valu) -> ControlFlow.return (st) (valu)
+            | Delayed(expr, envr_d) -> Anal_ST (heap, Frame_SK(stck, FLoc(List.nth (envr) (x))), expr, envr_d)
+          )
         )
+        | Lam(elam) -> ControlFlow.return (st) (VClosure(envr, Lam(elam)))
+        | App(efun, earg) -> ControlFlow.call (st) (FApp(envr, earg)) (efun) (envr)
+        | Pair(efst, esnd) -> ControlFlow.return (st) (VClosure(envr, Pair(efst, esnd)))
+        | Fst(epair) -> ControlFlow.call (st) (FFst) (epair) (envr)
+        | Snd(epair) -> ControlFlow.call (st) (FSnd) (epair) (envr)
+        | Case(ecase, el, er) -> ControlFlow.call (st) (FCase(envr, el, er)) (ecase) (envr)
+        | Inl(ecase) -> ControlFlow.return (st) (VInl(envr, ecase))
+        | Inr(ecase) -> ControlFlow.return (st) (VInr(envr, ecase))
+        | Fix(expr) -> ControlFlow.return (st) (VClosure(envr, Fix(expr)))
+        | True -> ControlFlow.return (st) (VTrue)
+        | False -> ControlFlow.return (st) (VFalse)
+        | Ifthenelse(eif, etrue, efalse) -> ControlFlow.call (st) (FIfthenelse(envr, etrue, efalse)) (eif) (envr)
+        | Num(n) -> ControlFlow.return (st) (VNum(n))
+        | Plus -> ControlFlow.return (st) (VPlus)
+        | Minus -> ControlFlow.return (st) (VMinus)
+        | Eq -> ControlFlow.return (st) (VEq)
       )
-      | Lam(elam) -> ControlFlow.return (st) (VClosure(envr, Lam(elam)))
-      | App(efun, earg) -> ControlFlow.call (st) (FApp(envr, earg)) (efun)
-      | Pair(efst, esnd) -> ControlFlow.return (st) (VClosure(envr, Pair(efst, esnd)))
-      | Fst(epair) -> ControlFlow.call (st) (FFst) (epair)
-      | Snd(epair) -> ControlFlow.call (st) (FSnd) (epair)
-      | Case(ecase, el, er) -> ControlFlow.call (st) (FCase(envr, el, er)) (ecase)
-      | Inl(ecase) -> ControlFlow.return (st) (VInl(envr, ecase))
-      | Inr(ecase) -> ControlFlow.return (st) (VInr(envr, ecase))
-      | Fix(expr) -> ControlFlow.return (st) (VClosure(envr, Fix(expr)))
-      | True -> ControlFlow.return (st) (VTrue)
-      | False -> ControlFlow.return (st) (VFalse)
-      | Ifthenelse(eif, etrue, efalse) -> ControlFlow.call (st) (FIfthenelse(envr, etrue, efalse)) (eif)
-      | Num(n) -> ControlFlow.return (st) (VNum(n))
-      | Plus -> ControlFlow.return (st) (VPlus)
-      | Minus -> ControlFlow.return (st) (VMinus)
-      | Eq -> ControlFlow.return (st) (VEq)
+    | Return_ST (heap, stck, envr: stoval Heap.heap * stack * value) -> (
+      match stck with
+        | Hole_SK -> raise Stuck
+        | Frame_SK (stck, fr) ->
+          (match fr, envr with
+          | _, VEunit -> raise Stuck
+          | _, VClosure(nlam, Fix(exp)) -> ControlFlow.recurse (st) (exp) (nlam) (Heap.allocate (heap) (Delayed(Fix(exp), nlam)))
+          | (FLoc (idx), env) -> Return_ST(Heap.update (heap) (idx) (Computed env), stck, env) 
+          | (FApp (napp, eapp), VClosure (nfun, Lam (efun))) -> ControlFlow.allocate (st) (efun) (nfun) (Heap.allocate (heap) (Delayed(eapp, napp)))
+          | (FFst, VClosure(npair, Pair(efst, esnd))) -> ControlFlow.branch (st) (efst) (npair)
+          | (FSnd, VClosure(npair, Pair(efst, esnd))) -> ControlFlow.branch (st) (esnd) (npair)
+          | (FCase(ncase, el, er), VInl(ninl, ecase)) -> ControlFlow.allocate (st) (el) (ncase) (Heap.allocate (heap) (Delayed(ecase, ninl)))
+          | (FCase(ncase, el, er), VInr(ninr, ecase)) -> ControlFlow.allocate (st) (er) (ncase) (Heap.allocate (heap) (Delayed(ecase, ninr)))
+          | (FIfthenelse(nif, etrue, efalse), VTrue) -> ControlFlow.branch (st) (etrue) (nif)
+          | (FIfthenelse(nif, etrue, efalse), VFalse) -> ControlFlow.branch (st) (efalse) (nif)
+          | (FApp(napp, eapp), VPlus) ->  ControlFlow.call (st) (FPlus) (eapp) (napp)
+          | (FApp(napp, eapp), VMinus) ->  ControlFlow.call (st) (FMinus) (eapp) (napp)
+          | (FApp(napp, eapp), VEq) -> ControlFlow.call (st) (FEq) (eapp) (napp)
+          | (FPlus, VClosure(nfun, Pair(efst, esnd))) -> ControlFlow.call (st) (FPlus_Env_Exp(nfun, esnd)) (efst) (nfun)
+          | (FMinus, VClosure(nfun, Pair(efst, esnd))) -> ControlFlow.call (st) (FMinus_Env_Exp(nfun, esnd)) (efst) (nfun)
+          | (FEq, VClosure(nfun, Pair(efst, esnd))) -> ControlFlow.call (st) (FEq_Env_Exp(nfun, esnd)) (efst) (nfun)
+          | (FPlus_Env_Exp(nplus, eplus), VNum(i)) -> ControlFlow.call (st) (FPlus_Num(i)) (eplus) (nplus)
+          | (FMinus_Env_Exp(nminus, eminus), VNum(i)) -> ControlFlow.call (st) (FMinus_Num(i)) (eminus) (nminus)
+          | (FEq_Env_Exp(neq, eeq), VNum(i)) -> ControlFlow.call (st) (FEq_Num(i)) (eeq) (neq)
+          | (FPlus_Num(i), VNum(j)) -> ControlFlow.return (st) (VNum(i + j))
+          | (FMinus_Num(i), VNum(j)) -> ControlFlow.return (st) (VNum(i - j))
+          | (FEq_Num(i), VNum(j)) -> ControlFlow.return (st) (if i = j then VTrue else VFalse)
+          | _ -> raise Stuck
+          )
     )
-  | Return_ST (heap, stck, envr: stoval Heap.heap * stack * value) -> (
-    match stck with
-      | Hole_SK -> raise Stuck
-      | Frame_SK (stck, fr) ->
-        (match fr, envr with
-        | _, VEunit -> raise Stuck
-        | _, VClosure(nlam, Fix(exp)) -> ControlFlow.allocate (st) (exp) (nlam) (Heap.allocate (heap) (Delayed(Fix(exp), nlam)))
-        | (FLoc (idx), env) -> Return_ST(Heap.update (heap) (idx) (Computed env), stck, env) 
-        | (FApp (napp, eapp), VClosure (nfun, Lam (efun))) -> ControlFlow.allocate (st) (efun) (nfun) (Heap.allocate (heap) (Delayed(eapp, napp)))
-        | (FFst, VClosure(npair, Pair(efst, esnd))) -> ControlFlow.branch (st) (efst) (npair)
-        | (FSnd, VClosure(npair, Pair(efst, esnd))) -> ControlFlow.branch (st) (esnd) (npair)
-        | (FCase(ncase, el, er), VInl(ninl, ecase)) -> ControlFlow.allocate (st) (el) (ncase) (Heap.allocate (heap) (Delayed(ecase, ninl)))
-        | (FCase(ncase, el, er), VInr(ninr, ecase)) -> ControlFlow.allocate (st) (er) (ncase) (Heap.allocate (heap) (Delayed(ecase, ninr)))
-        | (FIfthenelse(nif, etrue, efalse), VTrue) -> ControlFlow.branch (st) (etrue) (nif)
-        | (FIfthenelse(nif, etrue, efalse), VFalse) -> ControlFlow.branch (st) (efalse) (nif)
-        | (FApp(napp, eapp), VPlus) ->  ControlFlow.jump (st) (FPlus) (eapp) (napp)
-        | (FApp(napp, eapp), VMinus) ->  ControlFlow.jump (st) (FMinus) (eapp) (napp)
-        | (FApp(napp, eapp), VEq) -> ControlFlow.jump (st) (FEq) (eapp) (napp)
-        | (FPlus, VClosure(nfun, Pair(efst, esnd))) -> ControlFlow.jump (st) (FPlus_Env_Exp(nfun, esnd)) (efst) (nfun)
-        | (FMinus, VClosure(nfun, Pair(efst, esnd))) -> ControlFlow.jump (st) (FMinus_Env_Exp(nfun, esnd)) (efst) (nfun)
-        | (FEq, VClosure(nfun, Pair(efst, esnd))) -> ControlFlow.jump (st) (FEq_Env_Exp(nfun, esnd)) (efst) (nfun)
-        | (FPlus_Env_Exp(nplus, eplus), VNum(i)) -> ControlFlow.jump (st) (FPlus_Num(i)) (eplus) (nplus)
-        | (FMinus_Env_Exp(nminus, eminus), VNum(i)) -> ControlFlow.jump (st) (FMinus_Num(i)) (eminus) (nminus)
-        | (FEq_Env_Exp(neq, eeq), VNum(i)) -> ControlFlow.jump (st) (FEq_Num(i)) (eeq) (neq)
-        | (FPlus_Num(i), VNum(j)) -> ControlFlow.return (st) (VNum(i + j))
-        | (FMinus_Num(i), VNum(j)) -> ControlFlow.return (st) (VNum(i - j))
-        | (FEq_Num(i), VNum(j)) -> ControlFlow.return (st) (if i = j then VTrue else VFalse)
-        | _ -> raise Stuck
-        )
-  )
-                    
 (* exp2string : Tml.exp -> string *)
 let rec exp2string exp = 
   match exp with 
@@ -323,12 +324,35 @@ let rec exp2string exp =
   | Num n -> "<" ^ (string_of_int n) ^ ">"
   | Plus -> "+"  | Minus -> "-" | Eq -> "="
 
+let rec val2string (vlu: value): string =
+  match vlu with
+  | VClosure (_, func) -> (
+    match func with
+    | Lam(elam) -> "[env, lam. (" ^ (exp2string elam) ^ ")]"
+    | Fix(efix) -> "[env, fix. (" ^ (exp2string efix) ^ ")]"
+    | Pair(efst, esnd) -> "[env, (" ^ (exp2string efst) ^ "), (" ^ (exp2string esnd) ^ ")]"
+    | _ -> "[env, (?)]"
+  )
+  | VInl(_, e) -> "inl. " ^ (exp2string e) ^ ""
+  | VInr(_, e) -> "inr. " ^ (exp2string e) ^ ""
+  | VPlus -> exp2string (Plus)
+  | VMinus -> exp2string (Minus)
+  | VEq -> exp2string (Eq)
+  | VNum _ | VTrue | VFalse | VEunit -> exp2string (value2exp (vlu))
+
 (* state2string : state -> string 
  * you may modify this function for debugging your code *)
-let state2string st =
+let state2string (st: state): string =
+  let stackdepth (stc: stack) = 
+    let rec stackdepth_tail (stc: stack) (dep: int) = 
+      match stc with
+      | Hole_SK -> dep
+      | Frame_SK(oldstck, newfrm) -> stackdepth_tail (oldstck) (dep + 1)
+    in string_of_int (stackdepth_tail (stc) (0))
+  in
   match st with
-  | Anal_ST(_,_,exp,_) -> "Analysis : " ^ exp2string (exp)
-  | Return_ST(_,_,valu) -> "Return : " ^ exp2string (value2exp (valu))
+  | Anal_ST(_, stck, expr, _) -> "{{"^ stackdepth (stck) ^ "}} -> (" ^ (exp2string (expr)) ^ ")"
+  | Return_ST(_, stck, valu) -> "{{"^ stackdepth (stck) ^ "}} <- (" ^ (val2string (valu)) ^ ")"
 
 (* ------------------------------------------------------------- *)     
 let stepOpt1 e = try Some (step1 e) with Stuck -> None
